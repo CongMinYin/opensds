@@ -45,7 +45,8 @@ mkdir -p $FILE_LVM_DIR
 # nvme dir
 NVME_DIR=/opt/opensdsNvme
 # nvme device
-LVM_DEVICE=/dev/nvme0n1
+LVM_NVME_TCP_DEVICE=/dev/nvme0n1
+LVM_NVME_RDMA_DEVICE=/dev/nvme0n2
 
 osds::lvm::pkg_install(){
     sudo apt-get install -y lvm2 tgt open-iscsi ibverbs-utils
@@ -123,13 +124,15 @@ osds::lvm::create_volume_group_for_file(){
 
 osds::lvm::create_nvme_vg(){
     local vg=$1
+	local vg_rdma=$1-rdma
     local size=$2
-    cap=$(parted $LVM_DEVICE unit GB print free | grep 'Free Space' | tail -n1 | awk '{print $3}')
-    if [ cap > '$size' ];then
+	# Prioritize creating pool of tcp, nvme over tcp is well supported as long as kernel version > 4.8
+    cap=$(parted $LVM_NVME_TCP_DEVICE unit GB print free | grep 'Free Space' | tail -n1 | awk '{print $3}')
+	if [ cap > '$size' ];then
         # Only create if the file doesn't already exists
         # create volume group and prepare kernel module
         sudo mkdir -p $NVME_DIR/$vg
-        sudo mount $LVM_DEVICE $NVME_DIR/$vg
+        sudo mount $LVM_NVME_TCP_DEVICE $NVME_DIR/$vg
         local backing_file=$NVME_DIR/$vg/$vg$BACKING_FILE_SUFFIX
         if ! sudo vgs $vg; then
             # Only create if the file doesn't already exists
@@ -146,10 +149,44 @@ osds::lvm::create_nvme_vg(){
             if ! sudo vgs $vg; then
                 sudo vgcreate $vg $vg_dev
             fi
+			echo "----------------Create tcp pool--------------------------------"
         fi
     else
-        echo "disk $LVM_DEVICE does not have enough space"
+        echo "disk $LVM_NVME_TCP_DEVICE does not have enough space to create nvme over tcp pool"
     fi
+
+	# Then, try to create rdma pool, it need rdma nic to support
+    if [[ -e "$LVM_NVME_TCP_DEVICE" ]]; then
+		cap=$(parted $LVM_NVME_RDMA_DEVICE unit GB print free | grep 'Free Space' | tail -n1 | awk '{print $3}')
+		if [ cap > '$size' ];then
+			# Only create if the file doesn't already exists
+			# create volume group and prepare kernel module
+			sudo mkdir -p $NVME_DIR/$vg_rdma
+			sudo mount $LVM_NVME_RMDA_DEVICE $NVME_DIR/$vg_rdma
+			local backing_file=$NVME_DIR/$vg_rdma/$vg_rdma$BACKING_FILE_SUFFIX
+			if ! sudo vgs $vg_rdma; then
+				# Only create if the file doesn't already exists
+				[[ -f $backing_file ]] || truncate -s $size $backing_file
+				local vg_dev
+				vg_dev=`sudo losetup -f --show $backing_file`
+
+				# Only create physical volume if it doesn't already exist
+				if ! sudo pvs $vg_dev; then
+					sudo pvcreate $vg_dev
+				fi
+
+				# Only create volume group if it doesn't already exist
+				if ! sudo vgs $vg_rdma; then
+					sudo vgcreate $vg_rdma $vg_dev
+				fi
+			fi
+			echo "----------------Create rdma pool--------------------------------"
+		 else
+			echo "disk $LVM_NVME_RDMA_DEVICE does not have enough space to create rdma pool"
+		fi
+	else
+		echo "There is no nvme device 0n2"
+	fi
 }
 
 osds::lvm::set_configuration(){
@@ -236,6 +273,26 @@ cat >> $OPENSDS_DRIVER_CONFIG_DIR/lvm.yaml << OPENSDS_LVM_CONFIG_DOC
         isSpaceEfficient: false
       ioConnectivity:
         accessProtocol: nvmeof
+        maxIOPS: 7000000
+        maxBWS: 600
+      advanced:
+        diskType: SSD
+        latency: 20us
+OPENSDS_LVM_CONFIG_DOC
+
+cat >> $OPENSDS_DRIVER_CONFIG_DIR/lvm.yaml << OPENSDS_LVM_CONFIG_DOC
+
+  ${NVME_VOLUME_GROUP_NAME-rdma}:
+    diskType: NL-SAS
+    availabilityZone: default
+    multiAttach: true
+    storageType: block
+    extras:
+      dataStorage:
+        provisioningPolicy: Thin
+        isSpaceEfficient: false
+      ioConnectivity:
+        accessProtocol: nvmeof_rdma
         maxIOPS: 7000000
         maxBWS: 600
       advanced:
@@ -378,13 +435,14 @@ osds::lvm::install() {
 
     # Check nvmeof prerequisites
     local nvmevg=$NVME_VOLUME_GROUP_NAME
-    if [[ -e "$LVM_DEVICE" ]]; then
+    if [[ -e "$LVM_NVME_TCP_DEVICE" ]]; then
         #phys_port_cnt=$(ibv_devinfo |grep -Eow hca_id |wc -l)
         #echo "The actual quantity of RDMA ports is $phys_port_cnt"
 	#nvmetcpsupport=$(sudo modprobe nvmet-tcp)
         #if [[ "$phys_port_cnt" < '1' ]] && [ $nvmetcpsupport -ne 0 ] ; then
         #    echo "RDMA card not found , and kernel version can not support nvme-tcp "
         #else
+		# here originally creating a nvme pool, now create tcp pool and rdma pool together
         osds::lvm::create_nvme_vg $nvmevg $size
         osds::lvm::nvmeofpkginstall
         # Remove volumes that already exist
