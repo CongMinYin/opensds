@@ -131,7 +131,7 @@ osds::lvm::create_nvme_vg(){
 	if [ cap > '$size' ];then
         # Only create if the file doesn't already exists
         # create volume group and prepare kernel module
-        sudo mkdir -p $NVME_DIR/$vg
+        sudo mkdir -p -m 777  $NVME_DIR/$vg
         sudo mount $LVM_NVME_TCP_DEVICE $NVME_DIR/$vg
         local backing_file=$NVME_DIR/$vg/$vg$BACKING_FILE_SUFFIX
         if ! sudo vgs $vg; then
@@ -156,13 +156,13 @@ osds::lvm::create_nvme_vg(){
     fi
 
 	# Then, try to create rdma pool, it need rdma nic to support
-    if [[ -e "$LVM_NVME_TCP_DEVICE" ]]; then
+    if [[ -e "$LVM_NVME_RDMA_DEVICE" ]]; then
 		cap=$(parted $LVM_NVME_RDMA_DEVICE unit GB print free | grep 'Free Space' | tail -n1 | awk '{print $3}')
 		if [ cap > '$size' ];then
 			# Only create if the file doesn't already exists
 			# create volume group and prepare kernel module
-			sudo mkdir -p $NVME_DIR/$vg_rdma
-			sudo mount $LVM_NVME_RMDA_DEVICE $NVME_DIR/$vg_rdma
+			sudo mkdir -p -m 777 $NVME_DIR/$vg_rdma
+			sudo mount $LVM_NVME_RDMA_DEVICE $NVME_DIR/$vg_rdma
 			local backing_file=$NVME_DIR/$vg_rdma/$vg_rdma$BACKING_FILE_SUFFIX
 			if ! sudo vgs $vg_rdma; then
 				# Only create if the file doesn't already exists
@@ -193,7 +193,7 @@ osds::lvm::set_configuration(){
 cat > $OPENSDS_DRIVER_CONFIG_DIR/lvm.yaml << OPENSDS_LVM_CONFIG_DOC
 tgtBindIp: $HOST_IP
 tgtConfDir: /etc/tgt/conf.d
-pool:
+pool: 
   $DEFAULT_VOLUME_GROUP_NAME:
     diskType: NL-SAS
     availabilityZone: default
@@ -282,7 +282,7 @@ OPENSDS_LVM_CONFIG_DOC
 
 cat >> $OPENSDS_DRIVER_CONFIG_DIR/lvm.yaml << OPENSDS_LVM_CONFIG_DOC
 
-  ${NVME_VOLUME_GROUP_NAME-rdma}:
+  opensds-volumes-nvme-rdma:
     diskType: NL-SAS
     availabilityZone: default
     multiAttach: true
@@ -360,7 +360,7 @@ osds::lvm::clean_nvme_volume_group(){
     echo "nvme pool ${nvmevg}"
     osds::lvm::remove_volumes $nvmevg
     osds::lvm::remove_volume_group $nvmevg
-    # if there is no logical volume left, it's safe to attempt a cleanup
+	# if there is no logical volume left, it's safe to attempt a cleanup
     # of the backing file
     if [[ -z "$(sudo lvs --noheadings -o lv_name $nvmevg 2>/dev/null)" ]]; then
         osds::lvm::clean_backing_file $NVME_DIR/$nvmevg/$nvmevg$BACKING_FILE_SUFFIX
@@ -372,14 +372,38 @@ osds::lvm::clean_nvme_volume_group(){
 	sudo umount -l $NVME_DIR/$nvmevg
 	if [ $? -eq 0 ]; then
 		sudo rmdir $NVME_DIR/$nvmevg
+		echo "umount tcp & removement succeed"
+		break
+	fi
+    done
+	echo "*********if last line is not umount succeed, means unmout failed*****************"
+
+	if vgs $nvmevg-rdma ; then
+		echo "nvme pool ${nvmevg-rdma}"
+		osds::lvm::remove_volumes $nvmevg-rdma
+		osds::lvm::remove_volume_group $nvmevg-rdma
+		if [[ -z "$(sudo lvs --noheadings -o lv_name $nvmevg-rdma 2>/dev/null)" ]]; then
+			osds::lvm::clean_backing_file $NVME_DIR/$nvmevg-rdma/$nvmevg-rdma$BACKING_FILE_SUFFIX
+		fi
+		## umount nvme disk and remove corresponding dir
+		for i in {1..10}
+		do
+		# 'umount -l' can umount even if target is busy
+		sudo umount -l $NVME_DIR/$nvmevg-rdma
+		if [ $? -eq 0 ]; then
+			sudo rmdir $NVME_DIR/$nvmevg-rdma
+			sudo rmdir $NVME_DIR
+			echo "umount rdma & removement succeed"
+			return 0
+		fi
+		sleep 1
+		done
+		echo "umount rdma failed after retry 10 times"
+		echo "please check if there are any remaining attachments and umount dir ${NVME_DIRi}/${nvmevg-rdma} manually"
+	else
 		sudo rmdir $NVME_DIR
-		echo "umount & removement succeed"
 		return 0
 	fi
-	sleep 1
-    done
-    echo "umount failed after retry 10 times"
-    echo "please check if there are any remaining attachments and umount dir ${NVME_DIRi}/${nvmevg} manually"
 }
 
 
@@ -423,7 +447,9 @@ osds::lvm::install() {
     # Install lvm relative packages.
     osds::lvm::pkg_install
     osds::nfs::pkg_install
-    osds::lvm::create_volume_group_for_file $fvg $size
+   
+    
+	osds::lvm::create_volume_group_for_file $fvg $size
     osds::lvm::create_volume_group $vg $size
 
     # Remove iscsi targets
@@ -433,7 +459,7 @@ osds::lvm::install() {
     osds::lvm::set_configuration
     osds::lvm::set_configuration_for_file
 
-    # Check nvmeof prerequisites
+	# Check nvmeof prerequisites
     local nvmevg=$NVME_VOLUME_GROUP_NAME
     if [[ -e "$LVM_NVME_TCP_DEVICE" ]]; then
         #phys_port_cnt=$(ibv_devinfo |grep -Eow hca_id |wc -l)
@@ -448,7 +474,7 @@ osds::lvm::install() {
         # Remove volumes that already exist
         osds::lvm::remove_volumes $nvmevg
         osds::lvm::set_nvme_configuration
-        #fi
+		#fi
     fi
     osds::lvm::set_lvm_filter
 }
