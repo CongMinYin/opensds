@@ -131,7 +131,8 @@ func Discovery(connMap map[string]interface{}) error {
 	conn := ParseNvmeofConnectInfo(connMap)
 	targetip := conn.TgtPortal
 	targetport := conn.TgtPort
-	info, err := connector.ExecCmd("nvme", "discover", "-t", "tcp", "-a", targetip, "-s", targetport)
+	nvmeTransportType := conn.TranType
+	info, err := connector.ExecCmd("nvme", "discover", "-t", nvmeTransportType, "-a", targetip, "-s", targetport)
 	if err != nil {
 		log.Printf("Error encountered in send targets:%v, %v\n", err, info)
 		return err
