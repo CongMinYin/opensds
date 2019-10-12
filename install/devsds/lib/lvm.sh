@@ -28,11 +28,13 @@ DEFAULT_VOLUME_GROUP_NAME=$VOLUME_GROUP_NAME-default
 FILE_DEFAULT_VOLUME_GROUP_NAME=$FILE_GROUP_NAME-default
 
 # Name of lvm nvme volume group to use/create for nvme volumes
-NVME_VOLUME_GROUP_NAME=$VOLUME_GROUP_NAME-nvme
+NVME_TCP_VOLUME_GROUP_NAME=$VOLUME_GROUP_NAME-nvme-tcp
+NVME_RDMA_VOLUME_GROUP_NAME=$VOLUME_GROUP_NAME-nvme-rdma
 # Backing file name is of the form $VOLUME_GROUP$BACKING_FILE_SUFFIX
 BACKING_FILE_SUFFIX=-backing-file
 # Default volume size
 VOLUME_BACKING_FILE_SIZE=${VOLUME_BACKING_FILE_SIZE:-20G}
+# default path using for iscsi
 LVM_DIR=$OPT_DIR/lvm
 DATA_DIR=$LVM_DIR
 mkdir -p $LVM_DIR
@@ -45,7 +47,9 @@ mkdir -p $FILE_LVM_DIR
 # nvme dir
 NVME_DIR=/opt/opensdsNvme
 # nvme device
-LVM_DEVICE=/dev/nvme0n1
+LVM_TCP_DEVICE=/dev/nvme0n1
+# rdma device
+LVM_RDMA_DEVICE=/dev/nvme0n2
 
 osds::lvm::pkg_install(){
     sudo apt-get install -y lvm2 tgt open-iscsi ibverbs-utils
@@ -121,15 +125,15 @@ osds::lvm::create_volume_group_for_file(){
     fi
 }
 
-osds::lvm::create_nvme_vg(){
+osds::lvm::create_nvme_tcp_vg(){
     local vg=$1
     local size=$2
-    cap=$(parted $LVM_DEVICE unit GB print free | grep 'Free Space' | tail -n1 | awk '{print $3}')
+    cap=$(parted $LVM_TCP_DEVICE unit GB print free | grep 'Free Space' | tail -n1 | awk '{print $3}')
     if [ cap > '$size' ];then
         # Only create if the file doesn't already exists
         # create volume group and prepare kernel module
         sudo mkdir -p $NVME_DIR/$vg
-        sudo mount $LVM_DEVICE $NVME_DIR/$vg
+        sudo mount $LVM_TCP_DEVICE $NVME_DIR/$vg
         local backing_file=$NVME_DIR/$vg/$vg$BACKING_FILE_SUFFIX
         if ! sudo vgs $vg; then
             # Only create if the file doesn't already exists
@@ -148,7 +152,38 @@ osds::lvm::create_nvme_vg(){
             fi
         fi
     else
-        echo "disk $LVM_DEVICE does not have enough space"
+        echo "disk $LVM_TCP_DEVICE does not have enough space"
+    fi
+}
+
+osds::lvm::create_nvme_rdma_vg(){
+    local vg=$1
+    local size=$2
+    cap=$(parted $LVM_RDMA_DEVICE unit GB print free | grep 'Free Space' | tail -n1 | awk '{print $3}')
+    if [ cap > '$size' ];then
+        # Only create if the file doesn't already exists
+        # create volume group and prepare kernel module
+        sudo mkdir -p $NVME_DIR/$vg
+        sudo mount $LVM_RDMA_DEVICE $NVME_DIR/$vg
+        local backing_file=$NVME_DIR/$vg/$vg$BACKING_FILE_SUFFIX
+        if ! sudo vgs $vg; then
+            # Only create if the file doesn't already exists
+            [[ -f $backing_file ]] || truncate -s $size $backing_file
+            local vg_dev
+            vg_dev=`sudo losetup -f --show $backing_file`
+
+            # Only create physical volume if it doesn't already exist
+            if ! sudo pvs $vg_dev; then
+                sudo pvcreate $vg_dev
+            fi
+
+            # Only create volume group if it doesn't already exist
+            if ! sudo vgs $vg; then
+                sudo vgcreate $vg $vg_dev
+            fi
+        fi
+    else
+        echo "disk $LVM_RDMA_DEVICE does not have enough space"
     fi
 }
 
@@ -222,10 +257,32 @@ config_path = /etc/opensds/driver/nfs.yaml
 OPENSDS_FILE_GLOBAL_CONFIG_DOC
 }
 
-osds::lvm::set_nvme_configuration(){
+osds::lvm::set_nvme_tcp_configuration(){
 cat >> $OPENSDS_DRIVER_CONFIG_DIR/lvm.yaml << OPENSDS_LVM_CONFIG_DOC
 
-  $NVME_VOLUME_GROUP_NAME:
+  $NVME_TCP_VOLUME_GROUP_NAME:
+    diskType: NL-SAS
+    availabilityZone: default
+    multiAttach: true
+    storageType: block
+    extras:
+      dataStorage:
+        provisioningPolicy: Thin
+        isSpaceEfficient: false
+      ioConnectivity:
+        accessProtocol: nvmeof
+        maxIOPS: 7000000
+        maxBWS: 600
+      advanced:
+        diskType: SSD
+        latency: 20us
+OPENSDS_LVM_CONFIG_DOC
+}
+
+osds::lvm::set_nvme_rdma_configuration(){
+cat >> $OPENSDS_DRIVER_CONFIG_DIR/lvm.yaml << OPENSDS_LVM_CONFIG_DOC
+
+  $NVME_RDMA_VOLUME_GROUP_NAME:
     diskType: NL-SAS
     availabilityZone: default
     multiAttach: true
@@ -298,6 +355,7 @@ osds::lvm::clean_volume_group() {
     fi
 }
 
+# tcp and rdma both use this func to clean
 osds::lvm::clean_nvme_volume_group(){
     local nvmevg=$1
     echo "nvme pool ${nvmevg}"
@@ -377,21 +435,32 @@ osds::lvm::install() {
     osds::lvm::set_configuration_for_file
 
     # Check nvmeof prerequisites
-    local nvmevg=$NVME_VOLUME_GROUP_NAME
-    if [[ -e "$LVM_DEVICE" ]]; then
+    local nvme_tcp_vg=$NVME_TCP_VOLUME_GROUP_NAME
+    if [[ -e "$LVM_TCP_DEVICE" ]]; then
         #phys_port_cnt=$(ibv_devinfo |grep -Eow hca_id |wc -l)
         #echo "The actual quantity of RDMA ports is $phys_port_cnt"
 	#nvmetcpsupport=$(sudo modprobe nvmet-tcp)
         #if [[ "$phys_port_cnt" < '1' ]] && [ $nvmetcpsupport -ne 0 ] ; then
         #    echo "RDMA card not found , and kernel version can not support nvme-tcp "
         #else
-        osds::lvm::create_nvme_vg $nvmevg $size
+        osds::lvm::create_nvme_tcp_vg $nvme_tcp_vg $size
         osds::lvm::nvmeofpkginstall
         # Remove volumes that already exist
-        osds::lvm::remove_volumes $nvmevg
-        osds::lvm::set_nvme_configuration
+        osds::lvm::remove_volumes $nvme_tcp_vg
+        osds::lvm::set_nvme_tcp_configuration
         #fi
     fi
+
+	# here shuold check rdma prerequisites
+	# ...
+	local nvme_rdma_vg=$NVME_RDMA_VOLUME_GROUP_NAME
+    if [[ -e "$LVM_RDMA_DEVICE" ]]; then
+        # Remove volumes that already exist
+		osds::lvm::create_nvme_rdma_vg $nvme_rdma_vg $size
+        osds::lvm::remove_volumes $nvme_rdma_vg
+        osds::lvm::set_nvme_rdma_configuration
+    fi
+
     osds::lvm::set_lvm_filter
 }
 
@@ -399,10 +468,15 @@ osds::lvm::cleanup(){
     osds::lvm::clean_volume_group $DEFAULT_VOLUME_GROUP_NAME
     osds::lvm::clean_volume_group_for_file $FILE_DEFAULT_VOLUME_GROUP_NAME
     osds::lvm::clean_lvm_filter
-    local nvmevg=$NVME_VOLUME_GROUP_NAME
-    if vgs $nvmevg ; then
-    	osds::lvm::clean_nvme_volume_group $nvmevg
+    local nvme_tcp_vg=$NVME_TCP_VOLUME_GROUP_NAME
+    if vgs $nvme_tcp_vg ; then
+    	osds::lvm::clean_nvme_volume_group $nvme_tcp_vg
     fi
+    local nvme_rdma_vg=$NVME_RDMA_VOLUME_GROUP_NAME
+    if vgs $nvme_rdma_vg ; then
+    	osds::lvm::clean_nvme_volume_group $nvme_rdma_vg
+    fi
+
 }
 
 osds::lvm::uninstall(){
