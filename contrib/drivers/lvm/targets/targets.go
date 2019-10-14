@@ -20,7 +20,9 @@ import (
     "bufio"
     "strings"
     "github.com/opensds/opensds/contrib/drivers/utils/config"
+    "github.com/golang/glog"
 )
+
 const (
 	iscsiTgtPrefix  = "iqn.2017-10.io.opensds:"
 	nvmeofTgtPrefix = "nqn.2019-01.com.opensds:nvme:"
@@ -136,6 +138,7 @@ func (t *nvmeofTarget) CreateExport(volId, path, hostIp, initiator string, chapA
     nvmeofConfigMap := ReadNvmeofConfig("/etc/opensds/nvmeof.conf")
     if len(nvmeofConfigMap["nvmeof_transtype"]) != 0 {
         transtype = nvmeofConfigMap["nvmeof_transtype"]
+        glog.Infof("use nvmeof.conf, transtype=%s", transtype)
     }
     if err := t.CreateNvmeofTarget(volId, tgtNqn, path, initiator, transtype); err != nil {
 		return nil, err
@@ -168,6 +171,7 @@ func (t *nvmeofTarget) RemoveExport(volId, hostIp string) error {
     nvmeofConfigMap := ReadNvmeofConfig("/etc/opensds/nvmeof.conf")
     if len(nvmeofConfigMap["nvmeof_transtype"]) != 0 {
         transtype = nvmeofConfigMap["nvmeof_transtype"]
+        glog.Infof("use nvmeof.conf, transtype=%s", transtype)
     }
 	return t.RemoveNvmeofTarget(volId, tgtNqn, transtype)
 }

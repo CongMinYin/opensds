@@ -141,7 +141,7 @@ source $TOP_DIR/lib/util.sh
 source $TOP_DIR/sdsrc
 
 cat > $OPENSDS_CONFIG_DIR/nvmeof.conf << OPENSDS_NVMEOF_CONFIG_DOC
-nvmeof_transtype="tcp"
+nvmeof_transtype=tcp
 OPENSDS_NVMEOF_CONFIG_DOC
 
 
