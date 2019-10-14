@@ -64,6 +64,7 @@ osds::lvm::nvmeofpkginstall(){
     wget https://github.com/linux-nvme/nvme-cli/archive/v1.8.1.tar.gz -O /opt/nvmecli-1.8.1.tar.gz
     sudo tar -zxvf /opt/nvmecli-1.8.1.tar.gz -C /opt/
     cd /opt/nvme-cli-1.8.1 && sudo make && sudo make install
+    sudo rm -rf /opt/nvmecli-1.8.1.tar.gz
     # nvme kernel
     sudo modprobe nvmet
     sudo modprobe nvme-tcp

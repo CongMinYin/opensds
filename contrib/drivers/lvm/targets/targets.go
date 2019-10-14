@@ -14,8 +14,13 @@
 
 package targets
 
-import "github.com/opensds/opensds/contrib/drivers/utils/config"
-
+import (
+    "os"
+    "io"
+    "bufio"
+    "strings"
+    "github.com/opensds/opensds/contrib/drivers/utils/config"
+)
 const (
 	iscsiTgtPrefix  = "iqn.2017-10.io.opensds:"
 	nvmeofTgtPrefix = "nqn.2019-01.com.opensds:nvme:"
@@ -79,6 +84,43 @@ type nvmeofTarget struct {
 	NvmeofTarget
 }
 
+func ReadNvmeofConfig(path string) map[string]string {
+    nvmeofConfigMap := make(map[string]string)
+
+    f, err := os.Open(path)
+    if err != nil {
+        panic(err)
+    }
+    defer f.Close()
+
+    r := bufio.NewReader(f)
+    for {
+        b, _, err := r.ReadLine()
+        if err != nil {
+            if err == io.EOF {
+                break
+            }
+            panic(err)
+        }
+
+        s := strings.TrimSpace(string(b))
+        index := strings.Index(s, "=")
+        if index < 0 {
+            continue
+        }
+        key := strings.TrimSpace(s[:index])
+        if len(key) == 0 {
+            continue
+        }
+        value := strings.TrimSpace(s[index+1:])
+        if len(value) == 0 {
+            continue
+        }
+        nvmeofConfigMap[key] = value
+    }
+    return nvmeofConfigMap
+}
+
 func (t *nvmeofTarget) CreateExport(volId, path, hostIp, initiator string, chapAuth []string) (map[string]interface{}, error) {
 	tgtNqn := nvmeofTgtPrefix + volId
 	// So far nvmeof transtport type is defaultly set as tcp because of its widely use, but it can also be rdma/fc.
@@ -91,7 +133,11 @@ func (t *nvmeofTarget) CreateExport(volId, path, hostIp, initiator string, chapA
 	//to take the decision in the future.
 	var transtype string
 	transtype = "tcp"
-	if err := t.CreateNvmeofTarget(volId, tgtNqn, path, initiator, transtype); err != nil {
+    nvmeofConfigMap := ReadNvmeofConfig("/etc/opensds/nvmeof.conf")
+    if len(nvmeofConfigMap["nvmeof_transtype"]) != 0 {
+        transtype = nvmeofConfigMap["nvmeof_transtype"]
+    }
+    if err := t.CreateNvmeofTarget(volId, tgtNqn, path, initiator, transtype); err != nil {
 		return nil, err
 	}
 	conn := map[string]interface{}{
@@ -119,5 +165,9 @@ func (t *nvmeofTarget) RemoveExport(volId, hostIp string) error {
 	//to take the decision in the future.
 	var transtype string
 	transtype = "tcp"
+    nvmeofConfigMap := ReadNvmeofConfig("/etc/opensds/nvmeof.conf")
+    if len(nvmeofConfigMap["nvmeof_transtype"]) != 0 {
+        transtype = nvmeofConfigMap["nvmeof_transtype"]
+    }
 	return t.RemoveNvmeofTarget(volId, tgtNqn, transtype)
 }

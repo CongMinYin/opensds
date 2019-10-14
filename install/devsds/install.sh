@@ -140,6 +140,11 @@ ln -sf $SUMFILE $LOGFILE_DIR/$LOGFILE_NAME.summary
 source $TOP_DIR/lib/util.sh
 source $TOP_DIR/sdsrc
 
+cat > $OPENSDS_CONFIG_DIR/nvmeof.conf << OPENSDS_NVMEOF_CONFIG_DOC
+nvmeof_transtype="tcp"
+OPENSDS_NVMEOF_CONFIG_DOC
+
+
 osds::backendlist_check $OPENSDS_BACKEND_LIST
 
 # clean up opensds.conf

@@ -85,8 +85,8 @@ osds::opensds::install(){
     export OPENSDS_ENDPOINT=http://localhost:50040
     build/out/bin/osdsctl profile create '{"name": "default", "description": "default policy", "storageType": "block"}'
     build/out/bin/osdsctl profile create '{"name": "default", "description": "default policy", "storageType": "file", "provisioningProperties":{"ioConnectivity": {"accessProtocol": "NFS"},"DataStorage":{"StorageAccessCapability":["Read","Write","Execute"]}}}'
-	build/out/bin/osdsctl profile create '{"name": "nvmeTcp", "description": "default policy", "storageType": "block", "provisioningProperties":{"ioConnectivity": {"accessProtocol": "nvmeof"}}}'
-	build/out/bin/osdsctl profile create '{"name": "Iscsi", "description": "default policy", "storageType": "block", "provisioningProperties":{"ioConnectivity": {"accessProtocol": "iscsi"}}}'
+    build/out/bin/osdsctl profile create '{"name": "Nvmeof", "description": "default policy", "storageType": "block", "provisioningProperties":{"ioConnectivity": {"accessProtocol": "nvmeof"}}}'
+    build/out/bin/osdsctl profile create '{"name": "Iscsi", "description": "default policy", "storageType": "block", "provisioningProperties":{"ioConnectivity": {"accessProtocol": "iscsi"}}}'
 
     if [ $? == 0 ]; then
         osds::echo_summary devsds installed successfully !!
