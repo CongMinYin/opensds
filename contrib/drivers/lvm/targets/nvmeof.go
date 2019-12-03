@@ -20,7 +20,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strings"
 
 	log "github.com/golang/glog"
 	"github.com/opensds/opensds/pkg/utils"
@@ -57,6 +56,7 @@ func (t *NvmeoftgtTarget) init() {
 	t.execCmd("modprobe", "nvmet-rdma")
 	t.execCmd("modprobe", "nvmet-tcp")
 	t.execCmd("modprobe", "nvmet-fc")
+	t.execCmd("modprobe", "mlx4_core")
 }
 
 func (t *NvmeoftgtTarget) getTgtConfPath(volId string) string {
@@ -174,7 +174,7 @@ func (t *NvmeoftgtTarget) CreateNvmeofTarget(volId, tgtNqn, path, initiator, tra
 		log.Errorf("can not get nvmeof target %s with transport type %s", tgtNqn, transtype)
 		return err
 	}
-
+log.Infof("Nvmeof target %s with transtype %s will be created", tgtNqn, transtype)
 	var subexisted string
 	subexisted, err := t.GetNvmeofSubsystem(tgtNqn)
 	if err != nil {
@@ -218,7 +218,8 @@ func (t *NvmeoftgtTarget) CreateNvmeofTarget(volId, tgtNqn, path, initiator, tra
 		return err
 	}
 
-	ip = strings.Split(ip, " ")[0]
+	ip = "192.168.0.1"
+log.Infof("Nvmeof target ip is %s", ip)
 	err = t.WriteWithIo(ippath, ip)
 	if err != nil {
 		log.Errorf("Fail to set target ip")

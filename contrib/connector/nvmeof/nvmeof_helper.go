@@ -129,10 +129,9 @@ func GetNvmeSubsystems() (map[string]int, error) {
 // Discovery NVMe-OF target
 func Discovery(connMap map[string]interface{}) error {
 	conn := ParseNvmeofConnectInfo(connMap)
-	targetip := conn.TgtPortal
 	targetport := conn.TgtPort
 	nvmeTransportType := conn.TranType
-	info, err := connector.ExecCmd("nvme", "discover", "-t", nvmeTransportType, "-a", targetip, "-s", targetport)
+	info, err := connector.ExecCmd("nvme", "discover", "-t", nvmeTransportType, "-a", "192.168.0.1", "-s", targetport)
 	if err != nil {
 		log.Printf("Error encountered in send targets:%v, %v\n", err, info)
 		return err
@@ -145,12 +144,11 @@ func Connect(connMap map[string]interface{}) (string, error) {
 	CurrentNvmeDevice, _ := GetNvmeDevice()
 	conn := ParseNvmeofConnectInfo(connMap)
 	connNqn := conn.Nqn
-	targetPortal := conn.TgtPortal
 	port := conn.TgtPort
 	nvmeTransportType := conn.TranType
 	hostName := conn.HostNqn
 
-	cmd := "nvme connect -t " + nvmeTransportType + " -n " + connNqn + " -s " + port + " -a " + targetPortal
+	cmd := "nvme connect -t " + nvmeTransportType + " -n " + connNqn + " -s " + port + " -a " + "192.168.0.1"
 	if hostName != "ALL" {
 		cmd += " -q " + hostName
 	}

@@ -134,7 +134,7 @@ func (t *nvmeofTarget) CreateExport(volId, path, hostIp, initiator string, chapA
 	// According to the opensds architecture, it is a more approprite way for the opensds controller
 	//to take the decision in the future.
 	var transtype string
-	transtype = "tcp"
+	transtype = "rdma"
     nvmeofConfigMap := ReadNvmeofConfig("/etc/opensds/nvmeof.conf")
     if len(nvmeofConfigMap["nvmeof_transtype"]) != 0 {
         transtype = nvmeofConfigMap["nvmeof_transtype"]
@@ -167,7 +167,7 @@ func (t *nvmeofTarget) RemoveExport(volId, hostIp string) error {
 	// According to the opensds architecture, it is a more approprite way for the opensds controller
 	//to take the decision in the future.
 	var transtype string
-	transtype = "tcp"
+	transtype = "rdma"
     nvmeofConfigMap := ReadNvmeofConfig("/etc/opensds/nvmeof.conf")
     if len(nvmeofConfigMap["nvmeof_transtype"]) != 0 {
         transtype = nvmeofConfigMap["nvmeof_transtype"]
